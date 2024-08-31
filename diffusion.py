@@ -4,12 +4,14 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
+from sdelib.sde import SDE
+
 
 class Diffusion:
     data: DataLoader
     model: nn.Module
     optimizer: torch.optim.Optimizer
-    int_beta: Callable[[torch.Tensor], torch.Tensor]
+    sde: SDE
     weight: Callable[[torch.Tensor], torch.Tensor]
     T: torch.Tensor
 
@@ -17,13 +19,13 @@ class Diffusion:
                  data,
                  model,
                  optimizer,
-                 int_beta,
+                 sde,
                  weight,
                  T) -> None:
         self.data = data
         self.model = model
         self.optim = optimizer
-        self.int_beta = int_beta
+        self.sde = sde
         self.weight = weight
         self.T = T
 
@@ -32,13 +34,11 @@ class Diffusion:
         batch_size = batch.shape[0]
         # sample t
         t = self.T * torch.rand((batch_size,))
-        # sample y(t) from dy(s) = -1/2 beta(s) * y(s) dt + sqrt(beta(s)) dw(s)
-        mean = batch * torch.exp(-0.5 * self.int_beta(t))
-        var = torch.max(1 - torch.exp(-self.int_beta(t)), 1e-5) # lower bound the variance
-        std = torch.sqrt(var)
+        # sample from the sde
+        mean, std = self.sde.marginal_params(batch, t)
         noise = torch.randn(batch.shape)
         y_t = mean + std * noise
-        # weighted loss across all losses in the batch
+        # compute prediction and weighted loss
         pred = self.model(t, y_t)
         loss_per_batch = (((pred + noise) / std) ** 2).view(batch_size, -1).mean(1) # shape (batch_size,)
         return ( self.weight(t) * loss_per_batch ).mean()

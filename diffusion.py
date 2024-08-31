@@ -10,6 +10,7 @@ class Diffusion:
     model: nn.Module
     optimizer: torch.optim.Optimizer
     int_beta: Callable[[torch.Tensor], torch.Tensor]
+    weight: Callable[[torch.Tensor], torch.Tensor]
     T: torch.Tensor
 
     def __init__(self,
@@ -17,15 +18,17 @@ class Diffusion:
                  model,
                  optimizer,
                  int_beta,
+                 weight,
                  T) -> None:
         self.data = data
         self.model = model
         self.optim = optimizer
         self.int_beta = int_beta
+        self.weight = weight
         self.T = T
 
     def batch_loss(self,
-                   batch) -> torch.Tensor:
+                   batch: torch.Tensor) -> torch.Tensor:
         batch_size = batch.shape[0]
         # sample t
         t = self.T * torch.rand((batch_size,))
@@ -35,5 +38,16 @@ class Diffusion:
         std = torch.sqrt(var)
         noise = torch.randn(batch.shape)
         y_t = mean + std * noise
+        # weighted loss across all losses in the batch
         pred = self.model(t, y_t)
-        return torch.mean(((pred + noise) / std) ** 2)
+        loss_per_batch = (((pred + noise) / std) ** 2).view(batch_size, -1).mean(1) # shape (batch_size,)
+        return ( self.weight(t) * loss_per_batch ).mean()
+
+    def train(self, n_epochs: int) -> None:
+        for epoch in range(n_epochs):
+            for batch in self.data():
+                loss = self.batch_loss(batch)
+                loss.backward()
+                self.optim.step()
+                self.optim.zero_grad()
+            print(f"Loss after {epoch+1}/{n_epochs} epochs: ", loss)

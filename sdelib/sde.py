@@ -24,7 +24,7 @@ class SDE:
         raise NotImplementedError
 
     def prob_flow_ode(self,
-                      score: torch.nn.Module) -> 'SDE':
+                      score: Callable[[torch.Tensor, torch.Tensor], torch.Tensor]) -> 'SDE':
         def flow_f(x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
             return self.f(x, t) - 1/2 * self.g(t)**2 * score(x, t)
         return SDE(flow_f, 0)
